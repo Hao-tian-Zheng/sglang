@@ -2,6 +2,7 @@
 
 import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -134,6 +135,35 @@ def test_deepep_v2_runner_backstop(_moe_flags):
     with pytest.raises(ValueError, match="deep_gemm"):
         MoeRunner(MoeRunnerBackend.TRITON, MoeRunnerConfig())
     assert MoeRunner(MoeRunnerBackend.DEEP_GEMM, MoeRunnerConfig()).runner_core
+
+
+def test_nccl_runner_contract(_moe_flags):
+    _moe_flags.a2a_backend = MoeA2ABackend.NCCL
+    with pytest.raises(ValueError, match="requires the triton"):
+        MoeRunner(MoeRunnerBackend.DEEP_GEMM, MoeRunnerConfig())
+    with pytest.raises(ValueError, match="does not support MoE LoRA"):
+        MoeRunner(MoeRunnerBackend.TRITON, MoeRunnerConfig(), lora_enabled=True)
+    assert MoeRunner(MoeRunnerBackend.TRITON, MoeRunnerConfig()).runner_core
+
+
+def test_nccl_combine_replaces_post_experts_reduction(_moe_flags):
+    from sglang.srt.layers.moe import utils as moe_utils
+
+    _moe_flags.a2a_backend = MoeA2ABackend.NCCL
+    with (
+        patch.object(moe_utils, "should_skip_mlp_all_reduce", return_value=False),
+        patch.object(moe_utils, "should_use_dp_reduce_scatterv", return_value=False),
+        patch.object(
+            moe_utils,
+            "should_use_flashinfer_cutlass_moe_fp4_allgather",
+            return_value=False,
+        ),
+        patch.object(
+            moe_utils, "get_parallel", return_value=SimpleNamespace(dwdp_size=1)
+        ),
+    ):
+        assert moe_utils.should_skip_post_experts_all_reduce(is_tp_path=False)
+        assert moe_utils.should_skip_post_experts_all_reduce(is_tp_path=True)
 
 
 if __name__ == "__main__":

@@ -241,6 +241,71 @@ def handle_a2a_moe(server_args: Any):
             cfg.deepep_v2_mode,
         )
 
+    if a2a_backend == "nccl":
+        architecture = getattr(
+            getattr(model_config_of(server_args), "hf_config", None),
+            "architectures",
+            None,
+        )
+        if not architecture or architecture[0] != "Qwen3MoeForCausalLM":
+            raise ValueError(
+                "The eager NCCL MoE A2A backend is currently validated only "
+                "for Qwen3MoeForCausalLM; got architectures="
+                f"{architecture!r}. Select another --moe-a2a-backend."
+            )
+
+        resolved_runner = resolved_view(server_args).moe_runner_backend
+        if resolved_runner == "auto":
+            declare_resolution(
+                server_args, "_handle_a2a_moe", moe_runner_backend="triton"
+            )
+            logger.warning(
+                "NCCL MoE A2A: resolved --moe-runner-backend auto -> triton."
+            )
+        elif resolved_runner != "triton":
+            raise ValueError(
+                "--moe-a2a-backend nccl currently supports only "
+                "--moe-runner-backend triton; got "
+                f"{resolved_runner!r}."
+            )
+
+        unsupported_options = {
+            "--enable-lora": bool(cfg.enable_lora),
+            "--enable-eplb": cfg.enable_eplb,
+            "--ep-num-redundant-experts": cfg.ep_num_redundant_experts > 0,
+            "--init-expert-location": cfg.init_expert_location != "trivial",
+            "--enable-two-batch-overlap": cfg.enable_two_batch_overlap,
+            "--enable-single-batch-overlap": cfg.enable_single_batch_overlap,
+            "--enforce-shared-experts-fusion": cfg.enforce_shared_experts_fusion,
+            "--speculative-algorithm": cfg.speculative_algorithm is not None,
+        }
+        enabled_unsupported_options = [
+            option for option, enabled in unsupported_options.items() if enabled
+        ]
+        if enabled_unsupported_options:
+            raise ValueError(
+                "--moe-a2a-backend nccl does not support "
+                + ", ".join(enabled_unsupported_options)
+                + "."
+            )
+
+        cuda_graph_config = resolving_view(server_args).cuda_graph_config
+        for phase in Phase.ALL:
+            cuda_graph_config = with_phase(
+                cuda_graph_config,
+                phase,
+                backend=Backend.DISABLED,
+            )
+        declare_resolution(
+            server_args,
+            "_handle_a2a_moe",
+            cuda_graph_config=cuda_graph_config,
+        )
+        logger.warning(
+            "NCCL MoE A2A disables decode and prefill CUDA graphs because "
+            "variable split sizes are read on the host for each dispatch."
+        )
+
     # The resolving view, not the field: `_a2a_backend_overrides` may have
     # moved this already (waterfill forces `deepep`).
     a2a_now = resolved_view(server_args).moe_a2a_backend

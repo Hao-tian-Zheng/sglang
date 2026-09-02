@@ -2242,6 +2242,71 @@ class TestSamplingBackendTokenOracleEnvGate(CustomTestCase):
         self.assertNotIn("token_oracle", disabled_action.choices)
 
 
+class TestNcclA2AArgs(CustomTestCase):
+    """Eager NCCL A2A has a deliberately narrow, fail-fast contract."""
+
+    def _args(self, **overrides):
+        server_args = ServerArgs(model_path="dummy", moe_a2a_backend="nccl")
+        server_args._model_config = SimpleNamespace(
+            hf_config=SimpleNamespace(architectures=["Qwen3MoeForCausalLM"])
+        )
+        server_args.cuda_graph_config = CudaGraphConfig(
+            decode=PhaseConfig(backend=Backend.FULL, max_bs=512),
+            prefill=PhaseConfig(backend=Backend.FULL, max_bs=512),
+        )
+        server_args._resolved_overrides = []
+        valid = {f.name for f in dataclasses.fields(ServerArgs)}
+        for key, value in overrides.items():
+            assert key in valid, f"{key} is not a ServerArgs field"
+            setattr(server_args, key, value)
+        return server_args
+
+    def test_resolves_supported_configuration(self):
+        from sglang.srt.arg_groups.overrides import resolved_view
+
+        args = self._args(tp_size=4, ep_size=2, moe_runner_backend="auto")
+        handle_a2a_moe(args)
+
+        view = resolved_view(args)
+        self.assertEqual(view.ep_size, 4)
+        self.assertEqual(view.moe_runner_backend, "triton")
+        self.assertTrue(view.disable_shared_experts_fusion)
+        self.assertEqual(view.cuda_graph_config.decode.backend, Backend.DISABLED)
+        self.assertEqual(view.cuda_graph_config.prefill.backend, Backend.DISABLED)
+
+    def test_rejects_unvalidated_architecture(self):
+        args = self._args(moe_runner_backend="triton")
+        args._model_config.hf_config.architectures = ["Qwen3_5MoeForCausalLM"]
+        with self.assertRaisesRegex(ValueError, "validated only"):
+            handle_a2a_moe(args)
+
+    def test_rejects_non_triton_runner(self):
+        args = self._args(moe_runner_backend="deep_gemm")
+        with self.assertRaisesRegex(ValueError, "only.*triton"):
+            handle_a2a_moe(args)
+
+    def test_rejects_unsupported_options(self):
+        cases = (
+            ("enable_lora", True, "--enable-lora"),
+            ("enable_eplb", True, "--enable-eplb"),
+            ("ep_num_redundant_experts", 1, "--ep-num-redundant-experts"),
+            ("init_expert_location", "random", "--init-expert-location"),
+            ("enable_two_batch_overlap", True, "--enable-two-batch-overlap"),
+            ("enable_single_batch_overlap", True, "--enable-single-batch-overlap"),
+            (
+                "enforce_shared_experts_fusion",
+                True,
+                "--enforce-shared-experts-fusion",
+            ),
+            ("speculative_algorithm", "EAGLE", "--speculative-algorithm"),
+        )
+        for field, value, option in cases:
+            with self.subTest(option=option):
+                args = self._args(moe_runner_backend="triton", **{field: value})
+                with self.assertRaisesRegex(ValueError, option):
+                    handle_a2a_moe(args)
+
+
 class TestDeepEPv2Args(CustomTestCase):
     """DeepEP v2 server-argument resolution and validation."""
 

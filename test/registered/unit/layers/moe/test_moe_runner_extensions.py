@@ -8,6 +8,7 @@ from sglang.srt.layers.moe import MoeA2ABackend, MoeRunnerBackend
 from sglang.srt.layers.moe.fused_moe_triton import layer as fused_moe_layer_module
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
 from sglang.srt.layers.moe.moe_runner import runner as runner_module
+from sglang.srt.layers.moe.moe_runner import triton as triton_runner_module
 from sglang.srt.layers.moe.moe_runner.base import (
     DispatchMoeRunnerCore,
     MoeQuantInfo,
@@ -16,6 +17,10 @@ from sglang.srt.layers.moe.moe_runner.base import (
     PermuteMethodPool,
     RunnerInput,
     RunnerOutput,
+)
+from sglang.srt.layers.moe.token_dispatcher.nccl import (
+    NcclDispatchOutput,
+    NcclRouteHandle,
 )
 from sglang.srt.layers.moe.token_dispatcher.standard import (
     StandardCombineInput,
@@ -315,6 +320,60 @@ def test_non_triton_runner_input_skips_lora_hooks(
 
     assert torch.equal(result.hidden_states, torch.ones(1, 2))
     assert runner.runner_core.hooks_seen == [None]
+
+
+def test_nccl_triton_adapters_preserve_route_handle(monkeypatch) -> None:
+    route_handle = NcclRouteHandle(
+        send_splits=[1],
+        recv_splits=[1],
+        send_route_idx=torch.tensor([0]),
+        num_input_tokens=1,
+        top_k=1,
+    )
+    dispatch_output = NcclDispatchOutput(
+        hidden_states=torch.zeros(1, 2),
+        topk_output=StandardTopKOutput(
+            topk_weights=torch.ones(1, 1),
+            topk_ids=torch.zeros(1, 1, dtype=torch.int32),
+            router_logits=None,
+        ),
+        route_handle=route_handle,
+    )
+    runner_input = object()
+    seen = []
+
+    def fake_standard_adapter(standard_output, quant_info, config, state):
+        seen.append(standard_output)
+        return runner_input
+
+    monkeypatch.setattr(
+        triton_runner_module,
+        "pre_permute_standard_to_triton",
+        fake_standard_adapter,
+    )
+    running_state = {}
+    converted = triton_runner_module.pre_permute_nccl_to_triton(
+        dispatch_output,
+        MoeQuantInfo(),
+        MoeRunnerConfig(),
+        running_state,
+    )
+    assert converted is runner_input
+    assert seen[0].hidden_states is dispatch_output.hidden_states
+    assert seen[0].topk_output is dispatch_output.topk_output
+    assert running_state["nccl_route_handle"] is route_handle
+
+    runner_output = triton_runner_module.TritonRunnerOutput(
+        hidden_states=torch.ones(1, 2)
+    )
+    combine_input = triton_runner_module.post_permute_triton_to_nccl(
+        runner_output,
+        MoeQuantInfo(),
+        MoeRunnerConfig(),
+        running_state,
+    )
+    assert combine_input.hidden_states is runner_output.hidden_states
+    assert combine_input.route_handle is route_handle
 
 
 def test_trtllm_quant_method_defines_runner_after_create_moe_runner() -> None:
