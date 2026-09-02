@@ -182,5 +182,18 @@ def test_nccl_dispatcher_rejects_non_cuda_activation_before_graph_query():
         dispatcher.dispatch(hidden_states, topk_output)
 
 
+def test_nccl_dispatcher_rejects_non_bf16_model_dtype():
+    with pytest.raises(NotImplementedError, match="expects BF16"):
+        NcclDispatcher(
+            group=None,
+            moe_runner_config=MoeRunnerConfig(
+                num_experts=4,
+                num_local_experts=4,
+                top_k=1,
+                params_dtype=torch.float16,
+            ),
+        )
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

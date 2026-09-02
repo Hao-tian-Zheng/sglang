@@ -65,6 +65,11 @@ class NcclDispatcher(BaseDispatcher):
 
     def __init__(self, group: dist.ProcessGroup, moe_runner_config: MoeRunnerConfig):
         super().__init__()
+        if moe_runner_config.params_dtype != torch.bfloat16:
+            raise NotImplementedError(
+                "NCCL dispatcher currently expects BF16 model activations, "
+                f"got {moe_runner_config.params_dtype}"
+            )
         self.group = group
         self.world_size = dist.get_world_size(group)
         self.num_experts = moe_runner_config.num_experts
