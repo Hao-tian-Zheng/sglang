@@ -120,14 +120,14 @@ class NcclDispatcher(BaseDispatcher):
     def dispatch(
         self, hidden_states: torch.Tensor, topk_output: TopKOutput
     ) -> NcclDispatchOutput:
+        if not hidden_states.is_cuda:
+            raise NotImplementedError(
+                "NCCL MoE dispatcher requires CUDA activation tensors"
+            )
         if torch.cuda.is_current_stream_capturing():
             raise RuntimeError(
                 "NCCL MoE dispatcher does not support CUDA graph capture; "
                 "disable decode and prefill CUDA graphs"
-            )
-        if not hidden_states.is_cuda:
-            raise NotImplementedError(
-                "NCCL MoE dispatcher requires CUDA activation tensors"
             )
         if hidden_states.dtype != torch.bfloat16:
             raise NotImplementedError(

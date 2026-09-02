@@ -2288,6 +2288,7 @@ class TestNcclA2AArgs(CustomTestCase):
     def test_rejects_unsupported_options(self):
         cases = (
             ("enable_lora", True, "--enable-lora"),
+            ("lora_paths", ["adapter"], "--enable-lora"),
             ("enable_eplb", True, "--enable-eplb"),
             ("ep_num_redundant_experts", 1, "--ep-num-redundant-experts"),
             ("init_expert_location", "random", "--init-expert-location"),

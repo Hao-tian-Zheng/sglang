@@ -5,9 +5,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import torch
 
 from sglang.srt.layers.moe.moe_runner.base import MoeRunnerConfig
 from sglang.srt.layers.moe.moe_runner.runner import MoeRunner
+from sglang.srt.layers.moe.token_dispatcher.nccl import NcclDispatcher
+from sglang.srt.layers.moe.topk import StandardTopKOutput
 from sglang.srt.layers.moe.utils import MoeA2ABackend, MoeRunnerBackend
 from sglang.srt.runtime_context import get_flags
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -164,6 +167,19 @@ def test_nccl_combine_replaces_post_experts_reduction(_moe_flags):
     ):
         assert moe_utils.should_skip_post_experts_all_reduce(is_tp_path=False)
         assert moe_utils.should_skip_post_experts_all_reduce(is_tp_path=True)
+
+
+def test_nccl_dispatcher_rejects_non_cuda_activation_before_graph_query():
+    dispatcher = object.__new__(NcclDispatcher)
+    dispatcher.top_k = 1
+    hidden_states = torch.empty((1, 4))
+    topk_output = StandardTopKOutput(
+        topk_weights=torch.ones((1, 1)),
+        topk_ids=torch.zeros((1, 1), dtype=torch.int32),
+        router_logits=None,
+    )
+    with pytest.raises(NotImplementedError, match="requires CUDA"):
+        dispatcher.dispatch(hidden_states, topk_output)
 
 
 if __name__ == "__main__":

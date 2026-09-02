@@ -270,7 +270,10 @@ def handle_a2a_moe(server_args: Any):
             )
 
         unsupported_options = {
-            "--enable-lora": bool(cfg.enable_lora),
+            # --lora-paths implicitly enables LoRA during the later validation
+            # pass when --enable-lora is left at its backwards-compatible None
+            # default, so reject either spelling here before model construction.
+            "--enable-lora": bool(cfg.enable_lora) or bool(cfg.lora_paths),
             "--enable-eplb": cfg.enable_eplb,
             "--ep-num-redundant-experts": cfg.ep_num_redundant_experts > 0,
             "--init-expert-location": cfg.init_expert_location != "trivial",
