@@ -2376,6 +2376,7 @@ class ServerArgs:
             "deepep_v2",
             "ascend_tp",
             "pplx",
+            "nccl",
         ],
         Arg(
             help="Choose the backend for MoE A2A.",
@@ -2390,6 +2391,7 @@ class ServerArgs:
                 "megamoe",
                 "deepep_v2",
                 "pplx",
+                "nccl",
                 "ascend_tp",
             ],
             resolvable=True,

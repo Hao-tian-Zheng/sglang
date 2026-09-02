@@ -44,6 +44,7 @@ class MoeA2ABackend(Enum):
     MEGAMOE = "megamoe"
     DEEPEP_V2 = "deepep_v2"
     PPLX = "pplx"
+    NCCL = "nccl"
     CUSTOMIZED = "customized"
 
     @classmethod
@@ -87,6 +88,9 @@ class MoeA2ABackend(Enum):
 
     def is_pplx(self):
         return self == MoeA2ABackend.PPLX
+
+    def is_nccl(self):
+        return self == MoeA2ABackend.NCCL
 
     def is_customized(self):
         return self == MoeA2ABackend.CUSTOMIZED
@@ -701,6 +705,10 @@ def should_skip_post_experts_all_reduce(*, is_tp_path: bool) -> bool:
         would double-count and overflow BF16. Mirrors TRTLLM's
         ``not enable_alltoall`` gate
         (``tensorrt_llm/_torch/modules/fused_moe/interface.py:879``).
+      - ``get_moe_a2a_backend().is_nccl()``: the NCCL dispatcher's reverse
+        all-to-all returns and sums every routed-expert output on its source
+        rank. The backend is restricted to EP spanning the full TP group, so
+        this replaces either spelling of the post-experts group reduction.
 
     The first two reasons come from per-layer ``ForwardFlags`` published by
     the decoder via ``get_forward().scoped(...)``. Pass ``is_tp_path=True``
@@ -719,6 +727,8 @@ def should_skip_post_experts_all_reduce(*, is_tp_path: bool) -> bool:
     if get_moe_a2a_backend().is_pplx():
         # pplx's AllToAll.combine already sums each token's expert outputs back
         # to the source rank
+        return True
+    if get_moe_a2a_backend().is_nccl():
         return True
     return False
 

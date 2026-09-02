@@ -85,6 +85,20 @@ class MoeRunner:
                 "FP8 blockwise-quantized checkpoint, or --moe-a2a-backend deepep."
             )
 
+        if get_moe_a2a_backend().is_nccl() and not runner_backend.is_triton():
+            raise ValueError(
+                "--moe-a2a-backend nccl requires the triton MoE runner, but "
+                "this layer's quantization method selected "
+                f"'{runner_backend.value}'. Use --moe-runner-backend triton "
+                "with a Triton-compatible checkpoint."
+            )
+        if get_moe_a2a_backend().is_nccl() and lora_enabled:
+            raise ValueError(
+                "--moe-a2a-backend nccl does not support MoE LoRA because "
+                "adapter routing metadata is source-local. Disable LoRA or "
+                "select another MoE A2A backend."
+            )
+
         self.fused_func = None
 
         if custom_factory := _CUSTOM_RUNNER_CORE_FACTORIES.get(runner_backend.value):
